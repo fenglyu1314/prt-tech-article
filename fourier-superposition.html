@@ -41,6 +41,13 @@
   .stage-head h1 { font-size: 15px; margin: 0; font-weight: 600; }
   .stage-head .hint { font-size: 12px; color: var(--muted); }
   canvas { display: block; width: 100%; height: 100%; flex: 1 1 auto; touch-action: none; cursor: crosshair; }
+  .stage-body { flex: 1 1 auto; display: flex; min-height: 0; }
+  #cv { width: auto; flex: 1 1 auto; min-width: 0; }
+  .wind-pane {
+    flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+    border-left: 1px solid var(--line); padding: 6px;
+  }
+  #windCv { display: block; height: 100%; width: auto; flex: 0 0 auto; aspect-ratio: 1 / 1; touch-action: auto; cursor: default; }
   .side {
     flex: 0 0 300px; display: flex; flex-direction: column; gap: 14px;
     overflow-y: auto; padding-right: 4px;
@@ -102,7 +109,10 @@
       <h1>傅里叶叠加 · 一堆基怎么拼出这组离散采样</h1>
       <span class="hint" id="headHint">点击/拖过柱子即可编辑</span>
     </div>
-    <canvas id="cv"></canvas>
+    <div class="stage-body">
+      <canvas id="cv"></canvas>
+      <div class="wind-pane"><canvas id="windCv"></canvas></div>
+    </div>
   </div>
 
   <div class="side">
@@ -155,9 +165,15 @@
     <div class="card">
       <h2>投影权重</h2>
       <label class="toggle"><input type="checkbox" id="useCosine" /> 乘 cos 余弦加权（Lambert）</label>
+      <label class="toggle"><input type="checkbox" id="hemisphere" /> 半球采样（只采样法线半球）</label>
       <p class="desc" style="margin:6px 0 0">
         对应项目 <code>SHProjector</code> 的 cosine 模式：投影前把每个方向的值乘 <b>cosθ</b>（正对法线权重 1、掠射掉到 0）。
         开启后<b>真正被叠加逼近的是「原值 × 紫色余弦叶」</b>，蓝色虚线框为压低前的原值。
+      </p>
+      <p class="desc" style="margin:6px 0 0">
+        <b>半球采样</b>对应项目用 <code>fibonacciHemisphere</code> 只在法线所在半球发射射线：法线正对 <b>x=0.5</b>，
+        只有前向半球 <b>x∈[0.25,0.75]</b>（±90°）参与投影，背向半球（图中压暗的「未采样」区）被丢弃，
+        等价于 <code>if(dot(N,dir)&le;0) continue</code>。可与「乘 cos」叠加得到项目里的 <b>TS cosine</b> 组合。
       </p>
     </div>
 
@@ -165,6 +181,8 @@
       <h2>显示</h2>
       <label class="toggle"><input type="checkbox" id="showComps" /> 显示各 band 分量曲线</label>
       <label class="toggle"><input type="checkbox" id="showTarget" checked /> 显示数据柱</label>
+      <label class="toggle"><input type="checkbox" id="clampMin" /> 合成曲线下限限制为 0</label>
+      <label class="toggle"><input type="checkbox" id="clampMax" /> 合成曲线上限限制为 1</label>
     </div>
 
     <div class="card">
@@ -224,7 +242,10 @@
   let editMode = "binary";   // "binary" | "cont"
   let showComps = false;
   let showTarget = true;
+  let clampMin = false;      // 开启后把合成值下限限制为 0
+  let clampMax = false;      // 开启后把合成值上限限制为 1
   let useCosine = false;     // 乘 cos：投影前对数据做余弦加权（对应 SHProjector 的 cosine 模式）
+  let hemisphere = false;    // 半球采样：只采样法线所在半球（对应 fibonacciHemisphere）
   let playing = false;
 
   // ---------- 显示态（用于平滑过渡动画）----------
@@ -253,9 +274,19 @@
   }
   const clamp01 = v => Math.max(0, Math.min(1, v));
 
-  // 余弦加权（Lambert 余弦定律的 1D 类比）：把 x=0.5 当「正对法线」方向，
-  // 权重 = max(0, cos(π(x-0.5)))——中间为 1、两端（掠射方向）掉到 0。对应 SHProjector 里的 dt.z / dot(N,dir)。
-  const cosLobe = x => Math.max(0, Math.cos(Math.PI * (x - 0.5)));
+  // 余弦加权（Lambert 余弦定律的 1D 类比）：把 x=0.5 当「正对法线」方向。
+  // 缠绕图里 x∈[0,1] 走完整整一圈（angleOf = 2π·x），故与法线夹角 θ = 2π·|x-0.5|，
+  // 权重 = max(0, cosθ) = max(0, cos(2π(x-0.5)))——正对法线为 1，到 ±90°（x=0.25/0.75，掠射）归零。
+  // 注意：cosθ 在下半球本就为负、被 clamp 到 0，所以「乘 cos」的余弦叶支撑天然就是法线半球，
+  // 与「半球采样」的边界完全重合——对应 SHProjector 里的 max(0, dot(N,dir)) / dt.z。
+  const cosLobe = x => Math.max(0, Math.cos(2 * Math.PI * (x - 0.5)));
+
+  // 半球采样：只采样「法线所在半球」的方向。法线正对 x=0.5，前向半球 = x∈[0.25,0.75]（±90°）；
+  // 背向半球（[0,0.25]∪[0.75,1]）的方向被丢弃、不参与投影——对应项目里用 fibonacciHemisphere
+  // 直接在上半球生成模板（等价于 OS 分支的 if(dot(N,dir)<=0) continue）。
+  const HEMI_N = 0.5;                       // 法线方向（正对）
+  const HEMI_LO = 0.25, HEMI_HI = 0.75;     // 前向半球边界（±90°）
+  const inHemi = x => x >= HEMI_LO && x <= HEMI_HI;
 
   // ---------- 目标函数：柱状 = 阶梯 ----------
   function sampleTarget(x) {
@@ -276,7 +307,9 @@
     const f = new Float64Array(GRID);
     for (let i = 0; i < GRID; i++) {
       const x = (i + 0.5) / GRID;
-      f[i] = sampleTarget(x) * (useCosine ? cosLobe(x) : 1);   // 乘 cos：投影前的余弦加权
+      let w = useCosine ? cosLobe(x) : 1;                      // 乘 cos：投影前的余弦加权
+      if (hemisphere && !inHemi(x)) w = 0;                     // 半球采样：背向半球不采样
+      f[i] = sampleTarget(x) * w;
     }
     const dx = 1 / GRID;
     let a0 = 0;
@@ -314,6 +347,13 @@
     if (frac > 1e-4 && full + 1 <= MAXN) s += frac * bandContribution(x, full + 1, c);
     return s;
   }
+  // 合成显示值：按开关分别限制下限（≥0）与上限（≤1）
+  function synthDisp(x) {
+    let v = partialSumDisp(x);
+    if (clampMin) v = Math.max(0, v);
+    if (clampMax) v = Math.min(1, v);
+    return v;
+  }
 
   // ---------- 坐标映射 ----------
   const PAD = { l: 46, r: 18, t: 18, b: 34 };
@@ -348,11 +388,13 @@
     ctx.beginPath();
     ctx.rect(PAD.l, PAD.t, W - PAD.l - PAD.r, H - PAD.t - PAD.b);
     ctx.clip();
+    if (hemisphere) drawHemiMask();
     if (showTarget) drawBars();
     drawCosCurve();
     if (showComps) drawComponents();
     drawSynth();
     ctx.restore();
+    drawWinding();
   }
 
   function drawAxes() {
@@ -429,6 +471,36 @@
       }
     }
   }
+  // 半球采样遮罩：把「背向半球」（未采样方向区间）压暗，并标出法线方向与 ±90° 边界
+  function drawHemiMask() {
+    const yTop = PAD.t, yBot = H - PAD.b;
+    ctx.save();
+    // 背向半球（[0,0.25] 与 [0.75,1]）——未被采样，压暗
+    ctx.fillStyle = "rgba(9,12,20,0.55)";
+    for (const [a, b] of [[X0, HEMI_LO], [HEMI_HI, X1]]) {
+      const xa = sx(a), xb = sx(b);
+      ctx.fillRect(Math.min(xa, xb), yTop, Math.abs(xb - xa), yBot - yTop);
+      ctx.fillStyle = "#8b97b3"; ctx.font = "11px Segoe UI, sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      ctx.fillText("未采样", (xa + xb) / 2, yTop + 3);
+      ctx.fillStyle = "rgba(9,12,20,0.55)";
+    }
+    // 半球边界（±90°，x=0.25 / 0.75）虚线
+    ctx.strokeStyle = "#6b7899"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.globalAlpha = .85;
+    for (const bx of [HEMI_LO, HEMI_HI]) {
+      const px = sx(bx);
+      ctx.beginPath(); ctx.moveTo(px, yTop); ctx.lineTo(px, yBot); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    // 法线方向（x=0.5）实线 + 标注
+    const pn = sx(HEMI_N);
+    ctx.strokeStyle = "#c792ea"; ctx.globalAlpha = .9; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(pn, yTop); ctx.lineTo(pn, yBot); ctx.stroke();
+    ctx.globalAlpha = 1; ctx.fillStyle = "#c792ea";
+    ctx.font = "11px Segoe UI, sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText("法线", pn, yTop + 3);
+    ctx.restore();
+  }
   // 余弦叶：cos 权重曲线（半透明虚线），淡入淡出随 dispCosMix
   function drawCosCurve() {
     if (dispCosMix < 0.01) return;
@@ -468,10 +540,125 @@
     ctx.strokeStyle = "#ffd54a"; ctx.lineWidth = 2.5; ctx.beginPath();
     const steps = 600;
     for (let i = 0; i <= steps; i++) {
-      const x = i / steps, py = sy(partialSumDisp(x)), px = sx(x);
+      const x = i / steps, py = sy(synthDisp(x)), px = sx(x);
       i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
     }
     ctx.stroke();
+  }
+
+  // ---------- 缠绕图：把 x∈[0,1] 缠成直径 1 的圆，函数值作径向偏移 ----------
+  // 与主图同一套显示数据（partialSumDisp / dispBins），随叠加动画、编辑、cos 加权实时同步。
+  const windCv = document.getElementById("windCv");
+  const wctx = windCv.getContext("2d");
+  // 数据柱缠绕用的显示值：与 drawBars 一致（原值 × 余弦混合权重）
+  function dispTargetAt(x) {
+    let i = Math.floor(x * numBins);
+    if (i < 0) i = 0; if (i >= numBins) i = numBins - 1;
+    const orig = (dispBins[i] != null) ? dispBins[i] : bins[i];
+    const eff = 1 + dispCosMix * (cosLobe((i + 0.5) / numBins) - 1);
+    return orig * eff;
+  }
+  function drawWinding() {
+    if (!windCv) return;
+    const d = window.devicePixelRatio || 1;
+    const rect = windCv.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    if (w <= 0 || h <= 0) return;
+    windCv.width = Math.round(w * d); windCv.height = Math.round(h * d);
+    wctx.setTransform(d, 0, 0, d, 0, 0);
+    wctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2, cy = h / 2, pad = 22;
+    const maxR = Math.min(w, h) / 2 - pad;
+    if (maxR <= 0) return;
+    const YMAX = yMax;                    // 与主图纵向上限一致（1.35）
+    const unit = maxR / (0.5 + YMAX);     // 1 个函数单位对应的像素长度
+    const R0 = 0.5 * unit;                // 直径为 1 的基圆（缠成圆的 X 轴，y=0）
+    const angleOf = x => -Math.PI / 2 + 2 * Math.PI * x;   // x=0 在正上方，顺时针
+    const ptOf = (x, y) => {
+      const th = angleOf(x), r = R0 + y * unit;
+      return [cx + r * Math.cos(th), cy + r * Math.sin(th)];
+    };
+    const windCurve = (fn, color, lw, dash, alpha) => {
+      wctx.save();
+      wctx.strokeStyle = color; wctx.lineWidth = lw;
+      wctx.lineJoin = "round"; wctx.lineCap = "round";
+      wctx.globalAlpha = alpha == null ? 1 : alpha;
+      if (dash) wctx.setLineDash(dash);
+      wctx.beginPath();
+      const steps = 720;
+      for (let i = 0; i <= steps; i++) {
+        const p = ptOf(i / steps, fn(i / steps));
+        i === 0 ? wctx.moveTo(p[0], p[1]) : wctx.lineTo(p[0], p[1]);
+      }
+      wctx.closePath(); wctx.stroke();
+      wctx.restore();
+    };
+
+    // 基圆（虚线）——缠成圆的 X 轴，半径处 = 函数值 0
+    wctx.strokeStyle = "#2a3550"; wctx.lineWidth = 1;
+    wctx.setLineDash([4, 4]); wctx.globalAlpha = .9;
+    wctx.beginPath(); wctx.arc(cx, cy, R0, 0, 2 * Math.PI); wctx.stroke();
+    wctx.setLineDash([]);
+
+    // 角度刻度：x = 0, ¼, ½, ¾
+    wctx.font = "10px Segoe UI, sans-serif";
+    wctx.textAlign = "center"; wctx.textBaseline = "middle";
+    for (const [lab, x] of [["0", 0], ["¼", .25], ["½", .5], ["¾", .75]]) {
+      const th = angleOf(x), co = Math.cos(th), si = Math.sin(th);
+      wctx.strokeStyle = "#2a3550"; wctx.globalAlpha = .45;
+      wctx.beginPath();
+      wctx.moveTo(cx + R0 * co, cy + R0 * si);
+      wctx.lineTo(cx + (maxR + 2) * co, cy + (maxR + 2) * si);
+      wctx.stroke();
+      wctx.globalAlpha = 1; wctx.fillStyle = "#8b97b3";
+      wctx.fillText("x=" + lab, cx + (maxR + 11) * co, cy + (maxR + 11) * si);
+    }
+
+    // 中心十字
+    wctx.strokeStyle = "#2a3550"; wctx.globalAlpha = .6;
+    wctx.beginPath();
+    wctx.moveTo(cx - 4, cy); wctx.lineTo(cx + 4, cy);
+    wctx.moveTo(cx, cy - 4); wctx.lineTo(cx, cy + 4); wctx.stroke();
+    wctx.globalAlpha = 1;
+
+    // 半球采样：压暗背向半球扇区（未采样），标出 ±90° 边界与法线方向
+    if (hemisphere) {
+      wctx.save();
+      // 背向半球扇区（从 x=0.75 绕到 x=1.25(=0.25)，即圆的另一半）——未采样，压暗
+      wctx.fillStyle = "rgba(9,12,20,0.55)";
+      wctx.beginPath();
+      wctx.moveTo(cx, cy);
+      wctx.arc(cx, cy, maxR, angleOf(HEMI_HI), angleOf(HEMI_LO) + 2 * Math.PI);
+      wctx.closePath(); wctx.fill();
+      // ±90° 边界（x=0.25 / 0.75）虚线径向
+      wctx.strokeStyle = "#6b7899"; wctx.lineWidth = 1; wctx.setLineDash([4, 4]); wctx.globalAlpha = .85;
+      for (const bx of [HEMI_LO, HEMI_HI]) {
+        const th = angleOf(bx);
+        wctx.beginPath(); wctx.moveTo(cx, cy);
+        wctx.lineTo(cx + (maxR + 3) * Math.cos(th), cy + (maxR + 3) * Math.sin(th));
+        wctx.stroke();
+      }
+      wctx.setLineDash([]); wctx.globalAlpha = 1;
+      // 法线方向箭头（指向 x=0.5）
+      const thN = angleOf(HEMI_N), co = Math.cos(thN), si = Math.sin(thN);
+      const rN = maxR + 2, ax = cx + rN * co, ay = cy + rN * si, ah = 6;
+      wctx.strokeStyle = "#c792ea"; wctx.fillStyle = "#c792ea"; wctx.lineWidth = 2;
+      wctx.beginPath(); wctx.moveTo(cx, cy); wctx.lineTo(ax, ay); wctx.stroke();
+      wctx.beginPath();
+      wctx.moveTo(ax, ay);
+      wctx.lineTo(ax - ah * Math.cos(thN - 0.4), ay - ah * Math.sin(thN - 0.4));
+      wctx.lineTo(ax - ah * Math.cos(thN + 0.4), ay - ah * Math.sin(thN + 0.4));
+      wctx.closePath(); wctx.fill();
+      wctx.font = "10px Segoe UI, sans-serif"; wctx.textAlign = "center"; wctx.textBaseline = "middle";
+      wctx.fillText("法线", cx + (maxR + 14) * co, cy + (maxR + 14) * si);
+      wctx.restore();
+    }
+
+    // 目标数据缠绕（蓝，细）——与主图数据柱同源
+    if (showTarget) windCurve(dispTargetAt, "#4aa3ff", 1.4, null, .8);
+    // 合成曲线缠绕（黄，粗，闭合——周期为 1 正好缠一圈）
+    windCurve(synthDisp, "#ffd54a", 2.5, null, 1);
   }
 
   // ---------- 过渡动画引擎 ----------
@@ -638,7 +825,10 @@
 
   document.getElementById("showComps").addEventListener("change", e => { showComps = e.target.checked; draw(); });
   document.getElementById("showTarget").addEventListener("change", e => { showTarget = e.target.checked; draw(); });
+  document.getElementById("clampMin").addEventListener("change", e => { clampMin = e.target.checked; draw(); });
+  document.getElementById("clampMax").addEventListener("change", e => { clampMax = e.target.checked; draw(); });
   document.getElementById("useCosine").addEventListener("change", e => { useCosine = e.target.checked; computeCoeffs(); requestRender(); });
+  document.getElementById("hemisphere").addEventListener("change", e => { hemisphere = e.target.checked; computeCoeffs(); requestRender(); });
 
   document.querySelectorAll("[data-preset]").forEach(btn => {
     btn.addEventListener("click", () => { bins = fillBins(PRESET_FN[btn.dataset.preset]); computeCoeffs(); requestRender(); });

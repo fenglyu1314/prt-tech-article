@@ -33,7 +33,7 @@
   .synth {
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;
-    flex: 0 0 38%; min-height: 200px;
+    flex: 0 0 44%; min-height: 240px;
   }
   .synth-head {
     padding: 10px 16px; border-bottom: 1px solid var(--line);
@@ -41,7 +41,13 @@
   }
   .synth-head h1 { font-size: 15px; margin: 0; font-weight: 600; }
   .synth-head .hint { font-size: 12px; color: var(--muted); }
-  .synth canvas { display: block; width: 100%; height: 100%; flex: 1 1 auto; touch-action: none; cursor: grab; }
+  .synth-body { flex: 1 1 auto; display: flex; min-height: 0; }
+  #synthCv { display: block; flex: 1 1 auto; width: 100%; height: 100%; min-width: 0; touch-action: none; cursor: grab; }
+  .wind-pane {
+    flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
+    border-left: 1px solid var(--line); padding: 6px;
+  }
+  #windCv { display: block; height: 100%; aspect-ratio: 1 / 1; }
   .grid-wrap {
     flex: 1 1 auto; overflow-y: auto; padding-right: 4px;
     display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
@@ -91,9 +97,12 @@
     <div class="synth">
       <div class="synth-head">
         <h1>基函数浏览器 · 拖系数看每条基怎么拼成曲线</h1>
-        <span class="hint">上图 = 所有基按系数叠加的合成；下方每格是单条基函数</span>
+        <span class="hint">左：合成曲线（直角坐标）；右：把 X 轴缠成直径 1 的圆，函数值作径向偏移</span>
       </div>
-      <canvas id="synthCv"></canvas>
+      <div class="synth-body">
+        <canvas id="synthCv"></canvas>
+        <div class="wind-pane"><canvas id="windCv"></canvas></div>
+      </div>
     </div>
     <div class="grid-wrap" id="gridWrap"></div>
   </div>
@@ -115,6 +124,7 @@
       <h2>显示</h2>
       <label class="toggle"><input type="checkbox" id="showComps" checked /> 合成图叠加各分量（淡色）</label>
       <label class="toggle"><input type="checkbox" id="showRef" checked /> 单格显示基函数原形（幅度 ±1）</label>
+      <label class="toggle"><input type="checkbox" id="clamp01" /> 合成曲线限制在 0–1 区间</label>
     </div>
 
     <div class="card">
@@ -168,10 +178,11 @@
 (function () {
   // ---------- 状态 ----------
   let maxN = 3;
-  const CMIN = -1.5, CMAX = 1.5;         // 系数范围
+  const CMIN = -1, CMAX = 1;             // 系数范围
   let coeffs = { a0: 0, A: [], B: [] };  // A[n]=cos 系数, B[n]=sin 系数 (n=1..maxN)
   let showComps = true;
   let showRef = true;
+  let clamp01 = false;   // 开启后把合成值限制在 [0,1]，并用单色绘制
 
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -293,6 +304,35 @@
     ctx.stroke();
     ctx.restore();
   }
+  // 分段着色：函数值 ≥0 用 posColor，<0 用 negColor；在零交叉点插值断开换色。
+  // mapPt(x, y) -> [px, py]，直角图与缠绕图共用（只是映射不同）。
+  function plotSigned(ctx, mapPt, fn, posColor, negColor, lw) {
+    const steps = 720;
+    const xs = [], ys = [];
+    for (let i = 0; i <= steps; i++) { const x = i / steps; xs.push(x); ys.push(fn(x)); }
+    ctx.save();
+    ctx.lineWidth = lw; ctx.lineJoin = "round"; ctx.lineCap = "round";
+    let curPos = ys[0] >= 0;
+    ctx.strokeStyle = curPos ? posColor : negColor;
+    ctx.beginPath();
+    const p0 = mapPt(xs[0], ys[0]); ctx.moveTo(p0[0], p0[1]);
+    for (let i = 1; i <= steps; i++) {
+      const yPrev = ys[i - 1], yCur = ys[i], posCur = yCur >= 0;
+      if (posCur !== curPos) {
+        const t = yPrev / (yPrev - yCur);                 // y=0 处的插值比例
+        const xz = xs[i - 1] + t * (xs[i] - xs[i - 1]);
+        const pz = mapPt(xz, 0);
+        ctx.lineTo(pz[0], pz[1]); ctx.stroke();           // 收尾当前色段
+        curPos = posCur;
+        ctx.strokeStyle = curPos ? posColor : negColor;
+        ctx.beginPath(); ctx.moveTo(pz[0], pz[1]);        // 从交点续接新色段
+      }
+      const p = mapPt(xs[i], ys[i]);
+      ctx.lineTo(p[0], p[1]);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
   const cssColor = v => getComputedStyle(document.documentElement).getPropertyValue(v.replace("var(", "").replace(")", "")).trim() || v;
 
   // ---------- 合成图 ----------
@@ -312,9 +352,84 @@
         plot(ctx, map, x => c * basisValue(it, x), cssColor(it.color), 1, [3, 3], 0.5);
       }
     }
-    // 合成（黄，粗）
-    plot(ctx, map, synthValue, cssColor("var(--accent)"), 2.5, null, 1);
+    // 合成曲线：clamp01 开启 → 值限制在 [0,1] 且单色（黄）；否则 ≥0 黄 / <0 红
+    if (clamp01) {
+      plot(ctx, map, x => clamp(synthValue(x), 0, 1), cssColor("var(--accent)"), 2.5, null, 1);
+    } else {
+      plotSigned(ctx, (x, y) => [map.sx(x), map.sy(y)], synthValue,
+        cssColor("var(--accent)"), cssColor("var(--danger)"), 2.5);
+    }
     ctx.restore();
+    renderWinding();
+  }
+
+  // ---------- 缠绕图：把 x∈[0,1] 缠成直径 1 的圆，合成值作径向偏移 ----------
+  const windCv = document.getElementById("windCv");
+  function drawWindCurve(ctx, ptOf, fn, color, lw, dash, alpha, close) {
+    ctx.save();
+    ctx.strokeStyle = color; ctx.lineWidth = lw;
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    if (dash) ctx.setLineDash(dash);
+    ctx.beginPath();
+    const steps = 720;
+    for (let i = 0; i <= steps; i++) {
+      const p = ptOf(i / steps, fn(i / steps));
+      i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]);
+    }
+    if (close) ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+  function renderWinding() {
+    if (!windCv) return;
+    const { ctx, W, H } = setupCanvas(windCv);
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2, pad = 20;
+    const maxR = Math.min(W, H) / 2 - pad;
+    if (maxR <= 0) return;
+    const YMAX = 1.8;                     // 与左侧合成图纵向范围一致
+    const unit = maxR / (0.5 + YMAX);     // 1 个函数单位对应的像素长度
+    const R0 = 0.5 * unit;                // 直径为 1 的基圆（缠成圆的 X 轴，y=0）
+    const angleOf = x => -Math.PI / 2 + 2 * Math.PI * x;   // x=0 在正上方，顺时针
+    const ptOf = (x, y) => {
+      const th = angleOf(x), r = R0 + y * unit;
+      return [cx + r * Math.cos(th), cy + r * Math.sin(th)];
+    };
+
+    // 基圆（虚线）——缠成圆的 X 轴，半径处 = 函数值 0
+    ctx.strokeStyle = "#2a3550"; ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]); ctx.globalAlpha = .9;
+    ctx.beginPath(); ctx.arc(cx, cy, R0, 0, 2 * Math.PI); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 角度刻度：x = 0, ¼, ½, ¾（对应缠绕一周的位置）
+    ctx.font = "10px Segoe UI, sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const [lab, x] of [["0", 0], ["¼", .25], ["½", .5], ["¾", .75]]) {
+      const th = angleOf(x);
+      const co = Math.cos(th), si = Math.sin(th);
+      ctx.strokeStyle = "#2a3550"; ctx.globalAlpha = .45;
+      ctx.beginPath();
+      ctx.moveTo(cx + R0 * co, cy + R0 * si);
+      ctx.lineTo(cx + (maxR + 2) * co, cy + (maxR + 2) * si);
+      ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = "#8b97b3";
+      ctx.fillText("x=" + lab, cx + (maxR + 11) * co, cy + (maxR + 11) * si);
+    }
+
+    // 中心十字
+    ctx.strokeStyle = "#2a3550"; ctx.globalAlpha = .6;
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, cy); ctx.lineTo(cx + 4, cy);
+    ctx.moveTo(cx, cy - 4); ctx.lineTo(cx, cy + 4); ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // 缠绕后的合成曲线：clamp01 开启 → 限制在 [0,1] 且单色（黄，闭合）；否则 ≥0 黄 / <0 红
+    if (clamp01) {
+      drawWindCurve(ctx, ptOf, x => clamp(synthValue(x), 0, 1), cssColor("var(--accent)"), 2.5, null, 1, true);
+    } else {
+      plotSigned(ctx, ptOf, synthValue, cssColor("var(--accent)"), cssColor("var(--danger)"), 2.5);
+    }
   }
 
   // 合成图：滚轮缩放（以光标为中心）+ 拖动平移 + 复位
@@ -445,6 +560,7 @@
 
   document.getElementById("showComps").addEventListener("change", e => { showComps = e.target.checked; renderSynth(); });
   document.getElementById("showRef").addEventListener("change", e => { showRef = e.target.checked; renderAll(); });
+  document.getElementById("clamp01").addEventListener("change", e => { clamp01 = e.target.checked; renderSynth(); });
 
   // 合成图视图缩放 / 复位
   document.getElementById("resetViewBtn").addEventListener("click", resetSynthView);
