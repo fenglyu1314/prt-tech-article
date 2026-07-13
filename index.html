@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PRT 技术分享 · 交互演示合集</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #171e2e;
+    --panel-2: #1e2740;
+    --line: #2a3550;
+    --text: #d7e0f0;
+    --muted: #8b97b3;
+    --accent: #ffd54a;
+    --cos: #ffb74d;
+    --sin: #4fc3f7;
+    --const: #b28bff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    min-height: 100%;
+  }
+  body {
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(79,195,247,0.10), transparent 60%),
+      radial-gradient(1000px 500px at -10% 110%, rgba(178,139,255,0.10), transparent 60%),
+      var(--bg);
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 56px 24px 72px; }
+  header { margin-bottom: 40px; }
+  .eyebrow {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .16em;
+    color: var(--muted); margin: 0 0 10px;
+  }
+  h1 {
+    font-size: 30px; font-weight: 700; margin: 0 0 14px; line-height: 1.25;
+    background: linear-gradient(90deg, var(--accent), var(--sin));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .lead { font-size: 15px; color: var(--muted); line-height: 1.7; max-width: 640px; margin: 0; }
+
+  .grid {
+    display: grid; gap: 18px;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    margin-top: 8px;
+  }
+  .card {
+    display: flex; flex-direction: column; gap: 12px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 22px 22px 20px;
+    text-decoration: none; color: inherit;
+    transition: transform .18s ease, border-color .18s ease, background .18s ease;
+    position: relative; overflow: hidden;
+  }
+  .card::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, var(--c1, var(--accent)), var(--c2, var(--sin)));
+    opacity: .9;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    border-color: #3a4a6e; background: var(--panel-2);
+  }
+  .card .tag { font-size: 12px; color: var(--muted); letter-spacing: .06em; }
+  .card h2 { font-size: 18px; margin: 2px 0 0; font-weight: 600; }
+  .card p { font-size: 13px; color: var(--muted); line-height: 1.7; margin: 0; flex: 1 1 auto; }
+  .card .go {
+    font-size: 13px; color: var(--accent); font-weight: 600;
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 4px;
+  }
+  .card .go .arrow { transition: transform .18s ease; }
+  .card:hover .go .arrow { transform: translateX(4px); }
+
+  footer {
+    margin-top: 48px; padding-top: 22px; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--muted); line-height: 1.7;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Precomputed Radiance Transfer · Part 1</p>
+    <h1>基与投影 · 交互演示合集</h1>
+    <p class="lead">
+      这是 PRT 技术分享配套的交互式演示页面。拖动滑块、编辑数据，
+      直观感受"一组基函数如何拼出任意曲线"，以及投影权重是怎么算出来的。
+    </p>
+  </header>
+
+  <div class="grid">
+    <a class="card" href="basis-explorer.html" style="--c1:#ffd54a; --c2:#4fc3f7;">
+      <span class="tag">交互演示 01</span>
+      <h2>基函数浏览器</h2>
+      <p>拖动每条基函数的系数，实时看它们如何叠加成合成曲线；内置多种经典波形一键填入。</p>
+      <span class="go">打开演示 <span class="arrow">&rarr;</span></span>
+    </a>
+
+    <a class="card" href="fourier-superposition.html" style="--c1:#4fc3f7; --c2:#b28bff;">
+      <span class="tag">交互演示 02</span>
+      <h2>傅里叶叠加</h2>
+      <p>编辑一组离散采样点，观察一堆基怎么拼出这组数据，并查看每个基对应的投影权重。</p>
+      <span class="go">打开演示 <span class="arrow">&rarr;</span></span>
+    </a>
+  </div>
+
+  <footer>
+    页面均为纯前端静态实现，无需联网即可运行。
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>基函数浏览器 · 交互演示</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #171e2e;
+    --panel-2: #1e2740;
+    --line: #2a3550;
+    --text: #d7e0f0;
+    --muted: #8b97b3;
+    --accent: #ffd54a;   /* 合成曲线：黄 */
+    --cos: #ffb74d;      /* cos 基：暖 */
+    --sin: #4fc3f7;      /* sin 基：冷 */
+    --const: #b28bff;    /* 常数项：紫 */
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    height: 100%;
+  }
+  .wrap { display: flex; gap: 16px; padding: 16px; height: 100vh; min-height: 560px; }
+  .stage {
+    flex: 1 1 auto; display: flex; flex-direction: column; gap: 14px;
+    min-width: 0; overflow: hidden;
+  }
+  .synth {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;
+    flex: 0 0 38%; min-height: 200px;
+  }
+  .synth-head {
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  .synth-head h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .synth-head .hint { font-size: 12px; color: var(--muted); }
+  .synth canvas { display: block; width: 100%; height: 100%; flex: 1 1 auto; touch-action: none; cursor: grab; }
+  .grid-wrap {
+    flex: 1 1 auto; overflow-y: auto; padding-right: 4px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 12px; align-content: start;
+  }
+  .bcard {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .bcard .title { font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .bcard .title .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .bcard .title .expr { font-variant-numeric: tabular-nums; }
+  .bcard canvas { display: block; width: 100%; height: 72px; border-radius: 6px; background: #131a29; }
+  .bcard .ctl { display: flex; align-items: center; gap: 8px; }
+  .bcard .ctl input[type=range] { flex: 1 1 auto; }
+  .bcard .ctl .cval { flex: 0 0 auto; width: 46px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .side {
+    flex: 0 0 280px; display: flex; flex-direction: column; gap: 14px;
+    overflow-y: auto; padding-right: 4px;
+  }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+  .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .row label { font-size: 13px; flex: 0 0 auto; }
+  .row .val { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--accent); font-size: 13px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #26314f; border-color: #3a4a6e; }
+  button.danger { color: var(--danger); }
+  .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none; margin: 6px 0; }
+  .toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+  .desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .legend { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+  .legend .item { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 16px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+  code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage">
+    <div class="synth">
+      <div class="synth-head">
+        <h1>基函数浏览器 · 拖系数看每条基怎么拼成曲线</h1>
+        <span class="hint">上图 = 所有基按系数叠加的合成；下方每格是单条基函数</span>
+      </div>
+      <canvas id="synthCv"></canvas>
+    </div>
+    <div class="grid-wrap" id="gridWrap"></div>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h2>基函数阶数</h2>
+      <div class="row">
+        <label>最高 band N</label>
+        <span class="val" id="maxNVal">3</span>
+      </div>
+      <input type="range" id="maxNSlider" min="1" max="8" value="3" step="1" />
+      <p class="desc" style="margin:6px 0 0">
+        共 1 + 2×N 个基：1 个常数项 + N 个 <span style="color:var(--cos)">cos</span> + N 个 <span style="color:var(--sin)">sin</span>。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>显示</h2>
+      <label class="toggle"><input type="checkbox" id="showComps" checked /> 合成图叠加各分量（淡色）</label>
+      <label class="toggle"><input type="checkbox" id="showRef" checked /> 单格显示基函数原形（幅度 ±1）</label>
+    </div>
+
+    <div class="card">
+      <h2>一键填入经典波形</h2>
+      <p class="desc" style="margin:0 0 8px">把目标波形投影到当前 N 阶，看它由哪些系数组成：</p>
+      <div class="btn-grid">
+        <button data-preset="square">方波</button>
+        <button data-preset="saw">锯齿波</button>
+        <button data-preset="tri">三角波</button>
+        <button data-preset="pulse">矩形脉冲</button>
+      </div>
+      <div class="btn-grid" style="margin-top:8px">
+        <button data-preset="cos1">纯 cos(2πx)</button>
+        <button data-preset="sin1">纯 sin(2πx)</button>
+      </div>
+      <div class="btn-grid" style="margin-top:8px">
+        <button id="randomBtn">随机系数</button>
+        <button class="danger" id="clearBtn">全部清零</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>合成图视图</h2>
+      <div class="btn-grid" style="grid-template-columns:1fr 1fr 1fr">
+        <button id="zoomInBtn">＋ 放大</button>
+        <button id="zoomOutBtn">－ 缩小</button>
+        <button id="resetViewBtn">复位</button>
+      </div>
+      <p class="desc" style="margin:8px 0 0">
+        对上方合成图：<b>滚轮</b>以光标为中心缩放、<b>拖动</b>平移画布。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>图例</h2>
+      <div class="legend">
+        <div class="item"><span class="swatch" style="background:var(--accent)"></span> 合成：Σ 系数ₖ × 基ₖ</div>
+        <div class="item"><span class="swatch" style="background:var(--const)"></span> 常数项 a₀（水平线）</div>
+        <div class="item"><span class="swatch" style="background:var(--cos)"></span> cos 基：aₙ·cos(2πnx)</div>
+        <div class="item"><span class="swatch" style="background:var(--sin)"></span> sin 基：bₙ·sin(2πnx)</div>
+      </div>
+      <p class="desc" style="margin-bottom:0">
+        每格里高亮曲线 = <b>系数 × 基函数</b>；虚线是幅度 ±1 的基函数原形。拖滑块把某条基「放大/翻转」，上方合成图立刻跟着变。
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function () {
+  // ---------- 状态 ----------
+  let maxN = 3;
+  const CMIN = -1.5, CMAX = 1.5;         // 系数范围
+  let coeffs = { a0: 0, A: [], B: [] };  // A[n]=cos 系数, B[n]=sin 系数 (n=1..maxN)
+  let showComps = true;
+  let showRef = true;
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  // ---------- 基函数 ----------
+  // item.key: "a0" | "A" | "B"; item.n: 阶数
+  function basisValue(item, x) {
+    if (item.key === "a0") return 1;
+    const t = 2 * Math.PI * item.n * x;
+    return item.key === "A" ? Math.cos(t) : Math.sin(t);
+  }
+  function coefOf(item) {
+    if (item.key === "a0") return coeffs.a0;
+    return item.key === "A" ? coeffs.A[item.n] : coeffs.B[item.n];
+  }
+  function setCoef(item, v) {
+    if (item.key === "a0") coeffs.a0 = v;
+    else if (item.key === "A") coeffs.A[item.n] = v;
+    else coeffs.B[item.n] = v;
+  }
+  function synthValue(x) {
+    let s = coeffs.a0;
+    for (let n = 1; n <= maxN; n++)
+      s += coeffs.A[n] * Math.cos(2 * Math.PI * n * x) + coeffs.B[n] * Math.sin(2 * Math.PI * n * x);
+    return s;
+  }
+
+  // 按阶数排列：a0, (cos1,sin1), (cos2,sin2)...
+  let items = [];
+  function buildItems() {
+    items = [{ key: "a0", n: 0, color: "var(--const)", expr: "φ₀ = 1" }];
+    for (let n = 1; n <= maxN; n++) {
+      items.push({ key: "A", n, color: "var(--cos)", expr: `cos(2π·${n}·x)` });
+      items.push({ key: "B", n, color: "var(--sin)", expr: `sin(2π·${n}·x)` });
+    }
+  }
+  function ensureCoeffArrays() {
+    if (!coeffs.A) coeffs.A = [];
+    if (!coeffs.B) coeffs.B = [];
+    for (let n = 1; n <= maxN; n++) {
+      if (typeof coeffs.A[n] !== "number") coeffs.A[n] = 0;
+      if (typeof coeffs.B[n] !== "number") coeffs.B[n] = 0;
+    }
+  }
+
+  // ---------- canvas helper ----------
+  function setupCanvas(cv) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = cv.getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    const ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, W, H };
+  }
+
+  // 通用：在给定 ctx 上画 x∈[0,1]，y∈[ymin,ymax] 的坐标 + 曲线
+  // opts.view = {k,tx,ty} 时叠加缩放/平移（默认恒等）；ticks 为真时按可见范围动态出刻度
+  function drawFrame(ctx, W, H, pad, ymin, ymax, opts) {
+    const v = opts.view || { k: 1, tx: 0, ty: 0 };
+    const sxB = x => pad.l + x * (W - pad.l - pad.r);
+    const syB = y => (H - pad.b) - (y - ymin) / (ymax - ymin) * (H - pad.t - pad.b);
+    const sx = x => v.k * sxB(x) + v.tx;
+    const sy = y => v.k * syB(y) + v.ty;
+    const invX = px => ((px - v.tx) / v.k - pad.l) / (W - pad.l - pad.r);
+    const invY = py => ymin + ((H - pad.b) - (py - v.ty) / v.k) / (H - pad.t - pad.b) * (ymax - ymin);
+    ctx.clearRect(0, 0, W, H);
+    // 网格 / 轴
+    ctx.strokeStyle = "#2a3550"; ctx.fillStyle = "#8b97b3";
+    ctx.font = "10px Segoe UI, sans-serif"; ctx.lineWidth = 1;
+    // 0 线
+    ctx.globalAlpha = .8; ctx.beginPath();
+    ctx.moveTo(sx(0), sy(0)); ctx.lineTo(sx(1), sy(0)); ctx.stroke();
+    if (opts.ticks) {
+      const xLo = invX(pad.l), xHi = invX(W - pad.r);
+      const yLo = invY(H - pad.b), yHi = invY(pad.t);
+      const xStep = niceStep(xHi - xLo), yStep = niceStep(yHi - yLo);
+      ctx.textAlign = "center"; ctx.textBaseline = "top";
+      for (let x = Math.ceil(xLo / xStep) * xStep; x <= xHi + 1e-9; x += xStep) {
+        const px = sx(x);
+        if (px < pad.l - 0.5 || px > W - pad.r + 0.5) continue;
+        ctx.globalAlpha = .25; ctx.beginPath();
+        ctx.moveTo(px, pad.t); ctx.lineTo(px, H - pad.b); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.fillText(fmtTick(x, xStep), px, H - pad.b + 5);
+      }
+      ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      for (let y = Math.ceil(yLo / yStep) * yStep; y <= yHi + 1e-9; y += yStep) {
+        const py = sy(y);
+        if (py < pad.t - 0.5 || py > H - pad.b + 0.5) continue;
+        ctx.globalAlpha = Math.abs(y) < 1e-9 ? .6 : .22; ctx.beginPath();
+        ctx.moveTo(pad.l, py); ctx.lineTo(W - pad.r, py); ctx.stroke();
+        ctx.globalAlpha = 1; ctx.fillText(fmtTick(y, yStep), pad.l - 5, py);
+      }
+    }
+    ctx.globalAlpha = 1;
+    return { sx, sy };
+  }
+  function niceStep(range) {
+    const raw = Math.abs(range) / 5 || 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / mag;
+    return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+  }
+  function fmtTick(v, step) {
+    const dec = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+    return v.toFixed(Math.min(dec, 4));
+  }
+  function plot(ctx, map, fn, color, lw, dash, alpha) {
+    ctx.save();
+    ctx.strokeStyle = color; ctx.lineWidth = lw;
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    if (dash) ctx.setLineDash(dash);
+    ctx.beginPath();
+    const steps = 300;
+    for (let i = 0; i <= steps; i++) {
+      const x = i / steps, px = map.sx(x), py = map.sy(fn(x));
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  const cssColor = v => getComputedStyle(document.documentElement).getPropertyValue(v.replace("var(", "").replace(")", "")).trim() || v;
+
+  // ---------- 合成图 ----------
+  const synthCv = document.getElementById("synthCv");
+  const synthView = { k: 1, tx: 0, ty: 0 };   // 合成图的缩放/平移
+  function renderSynth() {
+    const { ctx, W, H } = setupCanvas(synthCv);
+    const pad = { l: 34, r: 14, t: 12, b: 22 };
+    const map = drawFrame(ctx, W, H, pad, -1.8, 1.8, { ticks: true, view: synthView });
+    ctx.save();
+    ctx.beginPath(); ctx.rect(pad.l, pad.t, W - pad.l - pad.r, H - pad.t - pad.b); ctx.clip();
+    // 分量（淡）
+    if (showComps) {
+      for (const it of items) {
+        const c = coefOf(it);
+        if (Math.abs(c) < 1e-4) continue;
+        plot(ctx, map, x => c * basisValue(it, x), cssColor(it.color), 1, [3, 3], 0.5);
+      }
+    }
+    // 合成（黄，粗）
+    plot(ctx, map, synthValue, cssColor("var(--accent)"), 2.5, null, 1);
+    ctx.restore();
+  }
+
+  // 合成图：滚轮缩放（以光标为中心）+ 拖动平移 + 复位
+  let sPanning = false, sLast = null;
+  function synthPos(e) { const r = synthCv.getBoundingClientRect(); return { px: e.clientX - r.left, py: e.clientY - r.top }; }
+  synthCv.style.cursor = "grab";
+  synthCv.addEventListener("pointerdown", e => {
+    sPanning = true; sLast = synthPos(e);
+    synthCv.setPointerCapture(e.pointerId); synthCv.style.cursor = "grabbing";
+  });
+  synthCv.addEventListener("pointermove", e => {
+    if (!sPanning) return;
+    const p = synthPos(e);
+    synthView.tx += p.px - sLast.px; synthView.ty += p.py - sLast.py;
+    sLast = p; renderSynth();
+  });
+  const sEnd = () => { sPanning = false; synthCv.style.cursor = "grab"; };
+  synthCv.addEventListener("pointerup", sEnd);
+  synthCv.addEventListener("pointercancel", sEnd);
+  synthCv.addEventListener("wheel", e => {
+    e.preventDefault();
+    const p = synthPos(e);
+    synthZoomAt(p.px, p.py, Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+  function synthZoomAt(px, py, factor) {
+    const nk = clamp(synthView.k * factor, 0.2, 20), f = nk / synthView.k;
+    synthView.tx = px - f * (px - synthView.tx);   // 保持光标下的点不动
+    synthView.ty = py - f * (py - synthView.ty);
+    synthView.k = nk; renderSynth();
+  }
+  function resetSynthView() { synthView.k = 1; synthView.tx = 0; synthView.ty = 0; renderSynth(); }
+  function synthCenter() { const r = synthCv.getBoundingClientRect(); return { px: r.width / 2, py: r.height / 2 }; }
+
+  // ---------- 单个基函数格子 ----------
+  const gridWrap = document.getElementById("gridWrap");
+  const cardRefs = [];   // { item, cv, valSpan, slider }
+  function buildGrid() {
+    gridWrap.innerHTML = "";
+    cardRefs.length = 0;
+    for (const item of items) {
+      const card = document.createElement("div");
+      card.className = "bcard";
+
+      const title = document.createElement("div");
+      title.className = "title";
+      const dot = document.createElement("span");
+      dot.className = "dot"; dot.style.background = cssColor(item.color);
+      const expr = document.createElement("span");
+      expr.className = "expr"; expr.textContent = item.expr;
+      title.appendChild(dot); title.appendChild(expr);
+
+      const cv = document.createElement("canvas");
+
+      const ctl = document.createElement("div");
+      ctl.className = "ctl";
+      const slider = document.createElement("input");
+      slider.type = "range"; slider.min = CMIN; slider.max = CMAX; slider.step = "0.01";
+      slider.value = coefOf(item);
+      slider.style.accentColor = cssColor(item.color);
+      const cval = document.createElement("span");
+      cval.className = "cval";
+
+      const ref = { item, cv, valSpan: cval, slider };
+      slider.addEventListener("input", () => {
+        setCoef(item, +slider.value);
+        cval.textContent = (+slider.value).toFixed(2);
+        renderCard(ref);
+        renderSynth();
+      });
+      ctl.appendChild(slider); ctl.appendChild(cval);
+
+      card.appendChild(title); card.appendChild(cv); card.appendChild(ctl);
+      gridWrap.appendChild(card);
+      cardRefs.push(ref);
+    }
+    // 布局稳定后再按实际尺寸绘制
+    requestAnimationFrame(() => { cardRefs.forEach(renderCard); renderSynth(); });
+  }
+  function renderCard(ref) {
+    const { ctx, W, H } = setupCanvas(ref.cv);
+    const pad = { l: 20, r: 8, t: 8, b: 8 };
+    const map = drawFrame(ctx, W, H, pad, -1.6, 1.6, { ticks: false });
+    ctx.save();
+    ctx.beginPath(); ctx.rect(pad.l, pad.t, W - pad.l - pad.r, H - pad.t - pad.b); ctx.clip();
+    const col = cssColor(ref.item.color);
+    // 基函数原形（幅度 ±1，虚线淡）
+    if (showRef) plot(ctx, map, x => basisValue(ref.item, x), col, 1, [3, 3], 0.35);
+    // 系数 × 基函数（高亮实线）
+    const c = coefOf(ref.item);
+    plot(ctx, map, x => c * basisValue(ref.item, x), col, 2, null, 1);
+    ctx.restore();
+    ref.valSpan.textContent = c.toFixed(2);
+    ref.slider.value = c;
+  }
+  function renderAll() { cardRefs.forEach(renderCard); renderSynth(); }
+
+  // ---------- 投影：把目标波形拆成系数（数值积分，周期 1）----------
+  function projectTo(fn) {
+    const GRID = 1024, dx = 1 / GRID;
+    let a0 = 0;
+    for (let i = 0; i < GRID; i++) a0 += fn((i + 0.5) / GRID) * dx;
+    coeffs.a0 = clamp(a0, CMIN, CMAX);
+    for (let n = 1; n <= maxN; n++) {
+      let an = 0, bn = 0;
+      for (let i = 0; i < GRID; i++) {
+        const x = (i + 0.5) / GRID, f = fn(x);
+        an += f * Math.cos(2 * Math.PI * n * x) * dx;
+        bn += f * Math.sin(2 * Math.PI * n * x) * dx;
+      }
+      coeffs.A[n] = clamp(2 * an, CMIN, CMAX);
+      coeffs.B[n] = clamp(2 * bn, CMIN, CMAX);
+    }
+  }
+  const PRESET_FN = {
+    square: x => Math.sin(2 * Math.PI * x) >= 0 ? 1 : -1,
+    saw:    x => 2 * x - 1,
+    tri:    x => 1 - 4 * Math.abs(x - 0.5),
+    pulse:  x => (x >= 0.2 && x <= 0.6) ? 1 : 0,
+  };
+
+  // ---------- 控件 ----------
+  const maxNSlider = document.getElementById("maxNSlider");
+  const maxNVal = document.getElementById("maxNVal");
+  maxNSlider.addEventListener("input", () => {
+    maxN = +maxNSlider.value; maxNVal.textContent = maxN;
+    ensureCoeffArrays(); buildItems(); buildGrid();
+  });
+
+  document.getElementById("showComps").addEventListener("change", e => { showComps = e.target.checked; renderSynth(); });
+  document.getElementById("showRef").addEventListener("change", e => { showRef = e.target.checked; renderAll(); });
+
+  // 合成图视图缩放 / 复位
+  document.getElementById("resetViewBtn").addEventListener("click", resetSynthView);
+  document.getElementById("zoomInBtn").addEventListener("click", () => { const c = synthCenter(); synthZoomAt(c.px, c.py, 1.25); });
+  document.getElementById("zoomOutBtn").addEventListener("click", () => { const c = synthCenter(); synthZoomAt(c.px, c.py, 0.8); });
+
+  document.querySelectorAll("[data-preset]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.preset;
+      if (key === "cos1") { coeffs = { a0: 0, A: [], B: [] }; ensureCoeffArrays(); coeffs.A[1] = 1; }
+      else if (key === "sin1") { coeffs = { a0: 0, A: [], B: [] }; ensureCoeffArrays(); coeffs.B[1] = 1; }
+      else { coeffs = { a0: 0, A: [], B: [] }; ensureCoeffArrays(); projectTo(PRESET_FN[key]); }
+      renderAll();
+    });
+  });
+  document.getElementById("randomBtn").addEventListener("click", () => {
+    const rnd = () => Math.round((Math.random() * 2 - 1) * 100) / 100;
+    coeffs.a0 = Math.round((Math.random() * 0.6 - 0.1) * 100) / 100;
+    for (let n = 1; n <= maxN; n++) { coeffs.A[n] = rnd() / n; coeffs.B[n] = rnd() / n; }
+    renderAll();
+  });
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    coeffs = { a0: 0, A: [], B: [] }; ensureCoeffArrays(); renderAll();
+  });
+
+  window.addEventListener("resize", renderAll);
+
+  // ---------- 启动 ----------
+  ensureCoeffArrays();
+  buildItems();
+  projectTo(PRESET_FN.square);   // 开场：方波拆解，直观看奇次 sin 系数
+  buildGrid();
+})();
+</script>
+</body>
+</html>

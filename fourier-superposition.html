@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>傅里叶叠加 · 交互演示</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --panel: #171e2e;
+    --panel-2: #1e2740;
+    --line: #2a3550;
+    --text: #d7e0f0;
+    --muted: #8b97b3;
+    --accent: #ffd54a;   /* 合成曲线：黄 */
+    --target: #4aa3ff;   /* 目标数据：蓝 */
+    --comp: #48d38a;     /* 分量：绿 */
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    height: 100%;
+  }
+  .wrap {
+    display: flex; gap: 16px; padding: 16px;
+    height: 100vh; min-height: 560px;
+  }
+  .stage {
+    flex: 1 1 auto; display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; overflow: hidden; min-width: 0;
+  }
+  .stage-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+  }
+  .stage-head h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .stage-head .hint { font-size: 12px; color: var(--muted); }
+  canvas { display: block; width: 100%; height: 100%; flex: 1 1 auto; touch-action: none; cursor: crosshair; }
+  .side {
+    flex: 0 0 300px; display: flex; flex-direction: column; gap: 14px;
+    overflow-y: auto; padding-right: 4px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .card h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--muted); margin: 0 0 10px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .row label { font-size: 13px; flex: 0 0 auto; }
+  .row .val { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--accent); font-size: 13px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  button {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover { background: #26314f; border-color: #3a4a6e; }
+  button.primary { background: var(--accent); color: #1a1400; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button.danger { color: var(--danger); }
+  .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; user-select: none; margin: 6px 0; }
+  .toggle input { accent-color: var(--accent); width: 15px; height: 15px; }
+  .legend { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+  .legend .item { display: flex; align-items: center; gap: 8px; }
+  .swatch { width: 16px; height: 3px; border-radius: 2px; flex: 0 0 auto; }
+  .swatch.box { height: 12px; opacity: .5; }
+  .desc { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  /* 分段开关 */
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1 1 0; border: 0; border-radius: 0; background: var(--panel-2); }
+  .seg button.active { background: var(--accent); color: #1a1400; font-weight: 600; }
+  /* 基函数 & 系数表 */
+  .coef-formula { font-size: 12px; color: var(--muted); line-height: 1.8; margin: 0 0 10px; }
+  .coef-formula b { color: var(--text); }
+  .cos-c { color: #ffb74d; }   /* cos 系数：暖 */
+  .sin-c { color: #4fc3f7; }   /* sin 系数：冷 */
+  .coef-head, .coef-row {
+    display: grid; grid-template-columns: 58px 1fr 1fr; gap: 6px; align-items: center;
+    font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .coef-head { color: var(--muted); font-size: 11px; padding: 0 8px 4px; }
+  .coef-list { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+  .coef-row { padding: 4px 8px; border-radius: 6px; background: var(--panel-2); }
+  .coef-row .idx { color: var(--muted); }
+  .coef-row .basis { font-size: 10px; color: var(--muted); display: block; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage">
+    <div class="stage-head">
+      <h1>傅里叶叠加 · 一堆基怎么拼出这组离散采样</h1>
+      <span class="hint" id="headHint">点击/拖过柱子即可编辑</span>
+    </div>
+    <canvas id="cv"></canvas>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h2>数据编辑</h2>
+      <div class="seg" id="modeSeg">
+        <button data-mode="binary" class="active">非零即一 (0/1)</button>
+        <button data-mode="cont">连续 (0~1)</button>
+      </div>
+      <p class="desc" id="modeDesc" style="margin:8px 0 0">
+        点击柱子在 0 / 1 间切换；按住拖过多根可快速刷。
+      </p>
+      <div class="row" style="margin-top:10px">
+        <label>柱子数量</label>
+        <span class="val" id="binsVal">24</span>
+      </div>
+      <input type="range" id="binsSlider" min="4" max="48" value="24" step="1" />
+    </div>
+
+    <div class="card">
+      <h2>叠加控制</h2>
+      <div class="row">
+        <label>保留到 band N</label>
+        <span class="val" id="nVal">3</span>
+      </div>
+      <input type="range" id="nSlider" min="0" max="40" value="3" step="1" />
+      <div class="row" style="margin-top:4px">
+        <span class="desc" id="termInfo">共 1 + 2×3 = 7 项</span>
+      </div>
+      <div class="btn-grid" style="margin-top:10px">
+        <button class="primary" id="playBtn">▶ 播放叠加</button>
+        <button id="resetN">回到 N=0</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>基函数 &amp; 系数</h2>
+      <p class="coef-formula">
+        f(x) ≈ <b>a₀</b> + Σₙ [ <span class="cos-c">aₙ</span>·cos(2πnx) + <span class="sin-c">bₙ</span>·sin(2πnx) ]
+      </p>
+      <div class="coef-head">
+        <span>band n</span><span class="cos-c">aₙ (cos)</span><span class="sin-c">bₙ (sin)</span>
+      </div>
+      <div class="coef-list" id="coefList"></div>
+      <p class="desc" style="margin:8px 0 0">
+        这些数由数据自动投影算出（暂当黑箱，后面再讲怎么来的）；只列出保留到 band N 的项，与绿色分量曲线一一对应。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>投影权重</h2>
+      <label class="toggle"><input type="checkbox" id="useCosine" /> 乘 cos 余弦加权（Lambert）</label>
+      <p class="desc" style="margin:6px 0 0">
+        对应项目 <code>SHProjector</code> 的 cosine 模式：投影前把每个方向的值乘 <b>cosθ</b>（正对法线权重 1、掠射掉到 0）。
+        开启后<b>真正被叠加逼近的是「原值 × 紫色余弦叶」</b>，蓝色虚线框为压低前的原值。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>显示</h2>
+      <label class="toggle"><input type="checkbox" id="showComps" /> 显示各 band 分量曲线</label>
+      <label class="toggle"><input type="checkbox" id="showTarget" checked /> 显示数据柱</label>
+    </div>
+
+    <div class="card">
+      <h2>预设数据</h2>
+      <div class="btn-grid">
+        <button data-preset="pulse">矩形脉冲</button>
+        <button data-preset="pulse2">窄脉冲</button>
+        <button data-preset="tri">三角波</button>
+        <button data-preset="step">阶跃</button>
+      </div>
+      <div class="btn-grid" style="margin-top:8px">
+        <button class="danger" id="clearBtn">全部清零</button>
+        <button id="sampleReset">恢复默认</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>视图（缩放 / 平移）</h2>
+      <div class="btn-grid three">
+        <button id="zoomInBtn">＋ 放大</button>
+        <button id="zoomOutBtn">－ 缩小</button>
+        <button class="primary" id="resetView">复位</button>
+      </div>
+      <p class="desc" style="margin:8px 0 0">
+        <b>滚轮</b>以光标为中心缩放；<b>右键 / 中键 / 按住空格</b>拖动平移画布（左键仍用于编辑柱子）。
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>图例</h2>
+      <div class="legend">
+        <div class="item"><span class="swatch box" style="background:var(--target)"></span> 目标：离散采样（柱状）</div>
+        <div class="item"><span class="swatch" style="background:var(--accent)"></span> 合成：Σ 系数ₖ × 基ₖ</div>
+        <div class="item"><span class="swatch" style="background:var(--comp)"></span> 分量：单个 band 的贡献</div>
+        <div class="item"><span class="swatch" style="background:#c792ea"></span> 余弦叶：cosθ 加权（开启「乘 cos」时）</div>
+      </div>
+      <p class="desc" style="margin-bottom:0">
+        系数由数据自动投影算出（这步暂当黑箱）。体会：<b>N 越大 → 越多基叠上去 → 越贴合柱形</b>；尖锐跳变处会出现抹不平的振铃（Gibbs 现象）。
+      </p>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function () {
+  const cv = document.getElementById("cv");
+  const ctx = cv.getContext("2d");
+
+  // ---------- 状态 ----------
+  const MAXN = 40;
+  const GRID = 1024;
+  let numBins = 24;
+  let bins = [];             // 每根柱的值 ∈ [0,1]，覆盖 x∈[i/numBins,(i+1)/numBins]
+  let coeffs = { a0: 0, A: [], B: [] };
+  let N = 3;
+  let editMode = "binary";   // "binary" | "cont"
+  let showComps = false;
+  let showTarget = true;
+  let useCosine = false;     // 乘 cos：投影前对数据做余弦加权（对应 SHProjector 的 cosine 模式）
+  let playing = false;
+
+  // ---------- 显示态（用于平滑过渡动画）----------
+  // 真实数据(bins/coeffs/N)立即更新；屏幕画的是 disp*，每帧向真实值逼近。
+  let dispCoeffs = { a0: 0, A: new Array(MAXN + 1).fill(0), B: new Array(MAXN + 1).fill(0) };
+  let dispBins = [];
+  let dispN = 0;            // 浮点：让新 band 平滑「生长」而非瞬间跳出
+  let dispCosMix = 0;       // 0=无加权 1=完全余弦加权（开关时平滑过渡）
+  let animId = 0, animLast = 0;
+
+  const X0 = 0, X1 = 1;
+  // y 范围固定：0 点与坐标系钉死在屏幕上不随曲线漂移；主看 [0,1]，上下各留一截给振铃
+  const yMin = -0.35, yMax = 1.35;
+
+  // ---------- 预设 ----------
+  const PRESET_FN = {
+    pulse:  x => (x >= 0.2 && x <= 0.6) ? 1 : 0,
+    pulse2: x => (x >= 0.42 && x <= 0.55) ? 1 : 0,
+    tri:    x => 1 - Math.abs(2 * x - 1),
+    step:   x => x < 0.5 ? 0 : 1,
+  };
+  function fillBins(fn) {
+    const b = new Array(numBins);
+    for (let i = 0; i < numBins; i++) b[i] = clamp01(fn((i + 0.5) / numBins));
+    return b;
+  }
+  const clamp01 = v => Math.max(0, Math.min(1, v));
+
+  // 余弦加权（Lambert 余弦定律的 1D 类比）：把 x=0.5 当「正对法线」方向，
+  // 权重 = max(0, cos(π(x-0.5)))——中间为 1、两端（掠射方向）掉到 0。对应 SHProjector 里的 dt.z / dot(N,dir)。
+  const cosLobe = x => Math.max(0, Math.cos(Math.PI * (x - 0.5)));
+
+  // ---------- 目标函数：柱状 = 阶梯 ----------
+  function sampleTarget(x) {
+    let i = Math.floor(x * numBins);
+    if (i < 0) i = 0; if (i >= numBins) i = numBins - 1;
+    return bins[i];
+  }
+
+  // 改柱数量时按形状重采样
+  function resampleBins(newN) {
+    const nb = new Array(newN);
+    for (let i = 0; i < newN; i++) nb[i] = sampleTarget((i + 0.5) / newN);
+    numBins = newN; bins = nb;
+  }
+
+  // ---------- 傅里叶投影（周期 1）：翻译自 b_superposition.py ----------
+  function computeCoeffs() {
+    const f = new Float64Array(GRID);
+    for (let i = 0; i < GRID; i++) {
+      const x = (i + 0.5) / GRID;
+      f[i] = sampleTarget(x) * (useCosine ? cosLobe(x) : 1);   // 乘 cos：投影前的余弦加权
+    }
+    const dx = 1 / GRID;
+    let a0 = 0;
+    for (let i = 0; i < GRID; i++) a0 += f[i] * dx;
+    const A = [0], B = [0];
+    for (let n = 1; n <= MAXN; n++) {
+      let an = 0, bn = 0;
+      for (let i = 0; i < GRID; i++) {
+        const x = (i + 0.5) / GRID;
+        an += f[i] * Math.cos(2 * Math.PI * n * x) * dx;
+        bn += f[i] * Math.sin(2 * Math.PI * n * x) * dx;
+      }
+      A.push(2 * an); B.push(2 * bn);
+    }
+    coeffs = { a0, A, B };
+  }
+  function bandContribution(x, n, c) {
+    c = c || coeffs;
+    if (n === 0) return c.a0;
+    return c.A[n] * Math.cos(2 * Math.PI * n * x)
+         + c.B[n] * Math.sin(2 * Math.PI * n * x);
+  }
+  function partialSum(x, uptoN) {
+    let s = coeffs.a0;
+    for (let n = 1; n <= uptoN; n++) s += bandContribution(x, n);
+    return s;
+  }
+  // 显示用：浮点 dispN → 整数项全额叠加，末尾一项按小数权重淡入
+  function partialSumDisp(x) {
+    const c = dispCoeffs;
+    let s = c.a0;
+    const full = Math.floor(dispN);
+    for (let n = 1; n <= full && n <= MAXN; n++) s += bandContribution(x, n, c);
+    const frac = dispN - full;
+    if (frac > 1e-4 && full + 1 <= MAXN) s += frac * bandContribution(x, full + 1, c);
+    return s;
+  }
+
+  // ---------- 坐标映射 ----------
+  const PAD = { l: 46, r: 18, t: 18, b: 34 };
+  let W = 0, H = 0, dpr = 1;
+  // 视图变换：最终屏幕坐标 = k × 基准映射 + 平移（k=缩放，tx/ty=平移）
+  const view = { k: 1, tx: 0, ty: 0 };
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    const rect = cv.getBoundingClientRect();
+    W = rect.width; H = rect.height;
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+  // 基准映射（数据 → 屏幕，未叠加视图变换）
+  const sxB = x => PAD.l + (x - X0) / (X1 - X0) * (W - PAD.l - PAD.r);
+  const syB = y => (H - PAD.b) - (y - yMin) / (yMax - yMin) * (H - PAD.t - PAD.b);
+  // 叠加视图变换后的最终映射与其逆映射（编辑柱子时也走逆映射，缩放下依旧准确）
+  const sx = x => view.k * sxB(x) + view.tx;
+  const sy = y => view.k * syB(y) + view.ty;
+  const invX = px => X0 + ((px - view.tx) / view.k - PAD.l) / (W - PAD.l - PAD.r) * (X1 - X0);
+  const invY = py => yMin + ((H - PAD.b) - (py - view.ty) / view.k) / (H - PAD.t - PAD.b) * (yMax - yMin);
+
+  // ---------- 绘制 ----------
+  function draw() {
+    if (dispBins.length !== numBins) dispBins = bins.slice();
+    ctx.clearRect(0, 0, W, H);
+    drawAxes();
+    // 裁剪到绘图区：超出固定值域的振铃只露一截，不会画到坐标轴/标签上
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(PAD.l, PAD.t, W - PAD.l - PAD.r, H - PAD.t - PAD.b);
+    ctx.clip();
+    if (showTarget) drawBars();
+    drawCosCurve();
+    if (showComps) drawComponents();
+    drawSynth();
+    ctx.restore();
+  }
+
+  function drawAxes() {
+    ctx.strokeStyle = "#2a3550"; ctx.lineWidth = 1;
+    ctx.fillStyle = "#8b97b3"; ctx.font = "11px Segoe UI, sans-serif";
+    // 可见范围随缩放 / 平移变化，据此动态选取刻度间隔
+    const xLo = invX(PAD.l), xHi = invX(W - PAD.r);
+    const yLo = invY(H - PAD.b), yHi = invY(PAD.t);
+    // 竖向网格（X 刻度）
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    const xStep = niceStep(xHi - xLo);
+    for (let x = Math.ceil(xLo / xStep) * xStep; x <= xHi + 1e-9; x += xStep) {
+      const px = sx(x);
+      if (px < PAD.l - 0.5 || px > W - PAD.r + 0.5) continue;
+      ctx.globalAlpha = Math.abs(x) < 1e-9 ? .6 : .35; ctx.beginPath();
+      ctx.moveTo(px, PAD.t); ctx.lineTo(px, H - PAD.b); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillText(fmtTick(x, xStep), px, H - PAD.b + 6);
+    }
+    // 横向网格（Y 刻度）
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    const yStep = niceStep(yHi - yLo);
+    for (let y = Math.ceil(yLo / yStep) * yStep; y <= yHi + 1e-9; y += yStep) {
+      const py = sy(y);
+      if (py < PAD.t - 0.5 || py > H - PAD.b + 0.5) continue;
+      ctx.globalAlpha = Math.abs(y) < 1e-9 ? .8 : .3;
+      ctx.beginPath(); ctx.moveTo(PAD.l, py); ctx.lineTo(W - PAD.r, py); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillText(fmtTick(y, yStep), PAD.l - 6, py);
+    }
+    ctx.globalAlpha = 1;
+  }
+  function niceStep(range) {
+    const raw = Math.abs(range) / 5 || 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / mag;
+    const step = n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10;
+    return step * mag;
+  }
+  function fmtTick(v, step) {
+    const dec = Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
+    return v.toFixed(Math.min(dec, 4));
+  }
+
+  function drawBars() {
+    const yBase = sy(0);
+    const fullW = (sx(1) - sx(0)) / numBins;
+    const pad = Math.min(fullW * 0.12, 3);
+    for (let i = 0; i < numBins; i++) {
+      const x0 = sx(i / numBins) + pad;
+      const w = fullW - 2 * pad;
+      const xc = (i + 0.5) / numBins;
+      const orig = dispBins[i];
+      const eff = 1 + dispCosMix * (cosLobe(xc) - 1);   // 有效权重（0→1 平滑过渡）
+      const v = orig * eff;                              // 加权后 = 真正被投影的高度
+      // cos 权重开启时，用浅色虚线框标出「未加权的原值」，直观看到被余弦压低了多少
+      if (dispCosMix > 0.01 && orig > 0.01) {
+        const yo = sy(orig);
+        ctx.globalAlpha = 0.4 * dispCosMix; ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = "#4aa3ff"; ctx.lineWidth = 1;
+        ctx.strokeRect(x0, Math.min(yo, yBase), w, Math.abs(yBase - yo));
+        ctx.setLineDash([]); ctx.globalAlpha = 1;
+      }
+      // 加权后的实心柱
+      const yTop = sy(v);
+      ctx.fillStyle = "rgba(74,163,255,0.30)";
+      ctx.strokeStyle = "#4aa3ff"; ctx.lineWidth = 1.2;
+      const h = yBase - yTop;
+      if (Math.abs(h) < 0.5) {
+        ctx.globalAlpha = .5;
+        ctx.beginPath(); ctx.moveTo(x0, yBase); ctx.lineTo(x0 + w, yBase); ctx.stroke();
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.fillRect(x0, Math.min(yTop, yBase), w, Math.abs(h));
+        ctx.strokeRect(x0, Math.min(yTop, yBase), w, Math.abs(h));
+      }
+    }
+  }
+  // 余弦叶：cos 权重曲线（半透明虚线），淡入淡出随 dispCosMix
+  function drawCosCurve() {
+    if (dispCosMix < 0.01) return;
+    ctx.save();
+    ctx.strokeStyle = "#c792ea"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+    ctx.globalAlpha = 0.55 * dispCosMix;
+    ctx.beginPath();
+    const steps = 240;
+    for (let i = 0; i <= steps; i++) {
+      const x = i / steps, px = sx(x), py = sy(cosLobe(x));
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.restore();
+  }
+  function drawComponents() {
+    const c = dispCoeffs;
+    const upto = Math.min(MAXN, Math.ceil(dispN - 1e-6));
+    for (let n = 1; n <= upto; n++) {
+      const w = clamp01(dispN - (n - 1));   // band n 的淡入权重（随 dispN 生长）
+      if (w <= 0.002) continue;
+      ctx.strokeStyle = "#48d38a";
+      ctx.globalAlpha = (0.18 + 0.5 * (n / Math.max(dispN, 1))) * w;
+      ctx.lineWidth = 1; ctx.beginPath();
+      const steps = 500;
+      for (let i = 0; i <= steps; i++) {
+        const x = i / steps, py = sy(bandContribution(x, n, c)), px = sx(x);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.globalAlpha = .5; ctx.strokeStyle = "#48d38a"; ctx.setLineDash([2, 3]);
+    ctx.beginPath(); ctx.moveTo(sx(0), sy(c.a0)); ctx.lineTo(sx(1), sy(c.a0));
+    ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  }
+  function drawSynth() {
+    ctx.strokeStyle = "#ffd54a"; ctx.lineWidth = 2.5; ctx.beginPath();
+    const steps = 600;
+    for (let i = 0; i <= steps; i++) {
+      const x = i / steps, py = sy(partialSumDisp(x)), px = sx(x);
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+
+  // ---------- 过渡动画引擎 ----------
+  // disp* 每帧向真实值(bins/coeffs/N)指数逼近；收敛后自动停帧省电。
+  const stepTo = (d, t, k) => d + (t - d) * k;
+  function requestRender() {
+    updateCoeffTable();
+    if (!animId) { animLast = performance.now(); animId = requestAnimationFrame(animate); }
+  }
+  function animate(now) {
+    const dt = Math.min(50, now - animLast); animLast = now;
+    const kFast = 1 - Math.exp(-dt / 55);    // 柱高：跟手，快
+    const kSlow = 1 - Math.exp(-dt / 120);   // 曲线/项数：柔和，稍慢
+    let moving = false;
+
+    // 项数 N（浮点生长）
+    if (Math.abs(dispN - N) > 1e-3) { dispN = stepTo(dispN, N, kSlow); moving = true; }
+    else dispN = N;
+
+    // cos 加权混合（开关时柱形/曲线一起平滑过渡）
+    const cosTgt = useCosine ? 1 : 0;
+    if (Math.abs(dispCosMix - cosTgt) > 1e-3) { dispCosMix = stepTo(dispCosMix, cosTgt, kSlow); moving = true; }
+    else dispCosMix = cosTgt;
+
+    // 柱高（拖动时跟手；数量变化则直接对齐，不逐根 morph）
+    if (dispBins.length !== bins.length) dispBins = bins.slice();
+    else for (let i = 0; i < bins.length; i++) {
+      if (Math.abs(dispBins[i] - bins[i]) > 1e-4) { dispBins[i] = stepTo(dispBins[i], bins[i], painting ? 1 : kFast); moving = true; }
+      else dispBins[i] = bins[i];
+    }
+
+    // 系数（数据/预设变化时，让合成曲线整体柔和 morph）
+    if (Math.abs(dispCoeffs.a0 - coeffs.a0) > 1e-5) { dispCoeffs.a0 = stepTo(dispCoeffs.a0, coeffs.a0, kSlow); moving = true; }
+    else dispCoeffs.a0 = coeffs.a0;
+    for (let n = 1; n <= MAXN; n++) {
+      const ta = coeffs.A[n] || 0, tb = coeffs.B[n] || 0;
+      if (Math.abs(dispCoeffs.A[n] - ta) > 1e-5) { dispCoeffs.A[n] = stepTo(dispCoeffs.A[n], ta, kSlow); moving = true; } else dispCoeffs.A[n] = ta;
+      if (Math.abs(dispCoeffs.B[n] - tb) > 1e-5) { dispCoeffs.B[n] = stepTo(dispCoeffs.B[n], tb, kSlow); moving = true; } else dispCoeffs.B[n] = tb;
+    }
+
+    draw();
+    animId = moving ? requestAnimationFrame(animate) : 0;
+  }
+
+  // ---------- 交互：编辑柱子 / 缩放平移 ----------
+  let painting = false;
+  let paintValue = 1;        // binary 刷值
+  let panning = false, panLast = null, spaceDown = false;
+  function binAtX(px) {
+    let i = Math.floor(invX(px) * numBins);
+    return Math.max(0, Math.min(numBins - 1, i));
+  }
+  function evtPos(e) {
+    const r = cv.getBoundingClientRect();
+    return { px: e.clientX - r.left, py: e.clientY - r.top };
+  }
+  function applyEdit(px, py, isDown) {
+    const i = binAtX(px);
+    if (editMode === "binary") {
+      if (isDown) paintValue = bins[i] > 0.5 ? 0 : 1;  // 起始柱决定刷成 0 还是 1
+      bins[i] = paintValue;
+    } else {
+      bins[i] = clamp01(invY(py));
+    }
+    computeCoeffs(); requestRender();
+  }
+  window.addEventListener("keydown", e => { if (e.code === "Space") spaceDown = true; });
+  window.addEventListener("keyup", e => { if (e.code === "Space") spaceDown = false; });
+  cv.addEventListener("contextmenu", e => e.preventDefault());
+  cv.addEventListener("pointerdown", e => {
+    const { px, py } = evtPos(e);
+    cv.setPointerCapture(e.pointerId);
+    // 右键 / 中键 / 按住空格 = 平移视图；左键 = 编辑柱子
+    if (e.button === 1 || e.button === 2 || spaceDown) {
+      panning = true; panLast = { px, py }; cv.style.cursor = "grabbing";
+      return;
+    }
+    painting = true;
+    applyEdit(px, py, true);
+  });
+  cv.addEventListener("pointermove", e => {
+    const { px, py } = evtPos(e);
+    if (panning) {
+      view.tx += px - panLast.px; view.ty += py - panLast.py;
+      panLast = { px, py }; draw(); return;
+    }
+    if (!painting) return;
+    applyEdit(px, py, false);
+  });
+  const endPointer = () => { painting = false; panning = false; cv.style.cursor = ""; };
+  cv.addEventListener("pointerup", endPointer);
+  cv.addEventListener("pointercancel", endPointer);
+
+  // 滚轮缩放（以光标为中心）
+  cv.addEventListener("wheel", e => {
+    e.preventDefault();
+    const { px, py } = evtPos(e);
+    zoomAt(px, py, Math.exp(-e.deltaY * 0.0015));
+  }, { passive: false });
+  function zoomAt(px, py, factor) {
+    const nk = Math.max(0.2, Math.min(20, view.k * factor));
+    const f = nk / view.k;
+    view.tx = px - f * (px - view.tx);   // 保持光标下的数据点不动
+    view.ty = py - f * (py - view.ty);
+    view.k = nk; draw();
+  }
+  function resetView() { view.k = 1; view.tx = 0; view.ty = 0; draw(); }
+
+  // ---------- 控件 ----------
+  const nSlider = document.getElementById("nSlider");
+  const nVal = document.getElementById("nVal");
+  const termInfo = document.getElementById("termInfo");
+
+  // 基函数 & 系数表：列出保留到 band N 的每一项（基函数表达式 + 实时系数值）
+  const coefList = document.getElementById("coefList");
+  const fmt = v => (v >= 0 ? "+" : "\u2212") + Math.abs(v).toFixed(3);   // 对齐正负号
+  function updateCoeffTable() {
+    let html =
+      `<div class="coef-row"><span class="idx">0<span class="basis">基 = 1</span></span>` +
+      `<span class="cos-c">${fmt(coeffs.a0)}</span><span class="sin-c">&mdash;</span></div>`;
+    for (let n = 1; n <= N; n++) {
+      html +=
+        `<div class="coef-row"><span class="idx">${n}<span class="basis">2πnx</span></span>` +
+        `<span class="cos-c">${fmt(coeffs.A[n] || 0)}</span>` +
+        `<span class="sin-c">${fmt(coeffs.B[n] || 0)}</span></div>`;
+    }
+    coefList.innerHTML = html;
+  }
+
+  function syncN() {
+    nVal.textContent = N; nSlider.value = N;
+    termInfo.textContent = `共 1 + 2×${N} = ${1 + 2 * N} 项`;
+  }
+  nSlider.addEventListener("input", () => { N = +nSlider.value; syncN(); requestRender(); });
+  document.getElementById("resetN").addEventListener("click", () => { N = 0; syncN(); requestRender(); });
+
+  // 视图缩放 / 复位
+  document.getElementById("resetView").addEventListener("click", resetView);
+  document.getElementById("zoomInBtn").addEventListener("click", () => zoomAt(W / 2, H / 2, 1.25));
+  document.getElementById("zoomOutBtn").addEventListener("click", () => zoomAt(W / 2, H / 2, 0.8));
+
+  const binsSlider = document.getElementById("binsSlider");
+  const binsVal = document.getElementById("binsVal");
+  binsSlider.addEventListener("input", () => {
+    binsVal.textContent = binsSlider.value;
+    resampleBins(+binsSlider.value);
+    computeCoeffs(); requestRender();
+  });
+
+  // 编辑模式分段开关
+  const modeDesc = document.getElementById("modeDesc");
+  document.querySelectorAll("#modeSeg button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("#modeSeg button").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      editMode = btn.dataset.mode;
+      modeDesc.textContent = editMode === "binary"
+        ? "点击柱子在 0 / 1 间切换；按住拖过多根可快速刷。"
+        : "上下拖动柱子设 0~1 高度；横向拖可连续画出包络。";
+      document.getElementById("headHint").textContent =
+        editMode === "binary" ? "点击/拖过柱子切换 0 / 1" : "拖动柱子设 0~1 高度";
+    });
+  });
+
+  document.getElementById("showComps").addEventListener("change", e => { showComps = e.target.checked; draw(); });
+  document.getElementById("showTarget").addEventListener("change", e => { showTarget = e.target.checked; draw(); });
+  document.getElementById("useCosine").addEventListener("change", e => { useCosine = e.target.checked; computeCoeffs(); requestRender(); });
+
+  document.querySelectorAll("[data-preset]").forEach(btn => {
+    btn.addEventListener("click", () => { bins = fillBins(PRESET_FN[btn.dataset.preset]); computeCoeffs(); requestRender(); });
+  });
+  document.getElementById("clearBtn").addEventListener("click", () => { bins = new Array(numBins).fill(0); computeCoeffs(); requestRender(); });
+  document.getElementById("sampleReset").addEventListener("click", () => { bins = fillBins(PRESET_FN.pulse); computeCoeffs(); requestRender(); });
+
+  // 播放
+  const playBtn = document.getElementById("playBtn");
+  playBtn.addEventListener("click", () => {
+    if (playing) return;
+    playing = true; playBtn.textContent = "播放中…";
+    const target = +nSlider.max;
+    N = 0; dispN = 0; syncN(); requestRender();
+    let last = performance.now();
+    function tick(now) {
+      if (now - last > 150) {
+        last = now; N++; syncN(); requestRender();
+        if (N >= target) { playing = false; playBtn.textContent = "▶ 播放叠加"; return; }
+      }
+      if (playing) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+
+  // ---------- 启动 ----------
+  window.addEventListener("resize", resize);
+  bins = fillBins(PRESET_FN.pulse);
+  dispBins = new Array(numBins).fill(0);   // 开场：柱子/曲线从 0 平滑「生长」出来
+  dispN = 0;
+  syncN();
+  computeCoeffs();
+  resize();
+  requestRender();
+})();
+</script>
+</body>
+</html>
